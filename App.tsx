@@ -1,47 +1,84 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Expense } from './types';
 import Dashboard from './components/Dashboard';
 import ExpenseForm from './components/ExpenseForm';
 import ExpenseList from './components/ExpenseList';
 import AiInsights from './components/AiInsights';
+import { fetchExpenses, insertExpense, removeExpense, getSupabase, checkConnection } from './services/supabaseService';
 
 const App: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [connStatus, setConnStatus] = useState<{connected: boolean, error?: string}>({ connected: false });
 
-  // Load from local storage
-  useEffect(() => {
-    const saved = localStorage.getItem('spendwise_expenses');
-    if (saved) {
-      setExpenses(JSON.parse(saved));
+  const loadData = useCallback(async () => {
+    const status = await checkConnection();
+    setConnStatus(status);
+    
+    if (status.connected && !status.error) {
+      setIsLoading(true);
+      try {
+        const data = await fetchExpenses();
+        setExpenses(data);
+      } catch (err) {
+        console.error("Load failed", err);
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      setIsLoading(false);
     }
-    setIsInitialized(true);
   }, []);
 
-  // Save to local storage
   useEffect(() => {
-    if (isInitialized) {
-      localStorage.setItem('spendwise_expenses', JSON.stringify(expenses));
+    loadData();
+    
+    const client = getSupabase();
+    if (client) {
+      const channel = client.channel('db-changes')
+        .on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table: 'expenses' 
+        }, () => {
+          loadData();
+        })
+        .subscribe();
+
+      return () => {
+        client.removeChannel(channel);
+      };
     }
-  }, [expenses, isInitialized]);
+  }, [loadData]);
 
-  const addExpense = (newExpense: Omit<Expense, 'id' | 'createdAt'>) => {
-    const expenseWithId: Expense = {
-      ...newExpense,
-      id: crypto.randomUUID(),
-      createdAt: Date.now()
-    };
-    setExpenses(prev => [expenseWithId, ...prev]);
+  const addExpense = async (newExpense: Omit<Expense, 'id' | 'createdAt'>) => {
+    setIsSyncing(true);
+    try {
+      const savedExpense = await insertExpense(newExpense);
+      if (savedExpense) {
+        setExpenses(prev => [savedExpense, ...prev]);
+      } else {
+        alert("Could not save. Is the 'expenses' table created in Supabase?");
+      }
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
-  const deleteExpense = (id: string) => {
-    setExpenses(prev => prev.filter(e => e.id !== id));
+  const deleteExpense = async (id: string) => {
+    setIsSyncing(true);
+    if (await removeExpense(id)) {
+      setExpenses(prev => prev.filter(e => e.id !== id));
+    }
+    setIsSyncing(false);
   };
+
+  const isFullyConnected = connStatus.connected && !connStatus.error;
 
   return (
     <div className="min-h-screen pb-20">
-      {/* Top Header */}
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
@@ -52,55 +89,71 @@ const App: React.FC = () => {
               <span className="text-xl font-bold tracking-tight text-slate-900">CMexpenseWise<span className="text-indigo-600">AI</span></span>
             </div>
             <div className="flex items-center gap-4">
-              <span className="hidden sm:inline-flex text-xs font-semibold text-slate-400 uppercase tracking-widest bg-slate-100 px-3 py-1 rounded-full">
-                Dashboard V1.0
-              </span>
+              {isSyncing && (
+                <span className="text-xs text-indigo-500 animate-pulse font-medium">
+                  <i className="fa-solid fa-cloud-arrow-up mr-1"></i> Syncing...
+                </span>
+              )}
             </div>
           </div>
         </div>
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* Left Side: Stats & List */}
-          <div className="lg:col-span-8 space-y-8">
-            <AiInsights expenses={expenses} />
-            <Dashboard expenses={expenses} />
-            <ExpenseList expenses={expenses} onDelete={deleteExpense} />
+        {!isFullyConnected ? (
+          <div className="flex flex-col items-center justify-center min-h-[70vh] text-center px-4">
+            <div className="bg-amber-50 text-amber-600 w-24 h-24 rounded-full flex items-center justify-center mb-8 shadow-xl">
+              <i className="fa-solid fa-database text-4xl"></i>
+            </div>
+            <h2 className="text-3xl font-black text-slate-900 mb-4">Database Not Found</h2>
+            <p className="text-slate-500 max-w-lg mb-10 text-lg leading-relaxed">
+              Your API key works, but the <code className="bg-slate-100 px-2 py-1 rounded text-indigo-600 font-mono">expenses</code> table is missing. 
+              Run the following SQL in your Supabase SQL Editor:
+            </p>
+            
+            <div className="bg-slate-900 text-slate-300 p-6 rounded-2xl text-left w-full max-w-2xl shadow-2xl relative group">
+              <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap text-indigo-300">
+{`CREATE TABLE expenses (
+  id uuid primary key default uuid_generate_v4(),
+  amount numeric not null,
+  date text not null,
+  category text not null,
+  description text,
+  created_at timestamp with time zone default now()
+);`}
+              </pre>
+              <button 
+                onClick={() => loadData()}
+                className="mt-8 w-full bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+              >
+                I've run the SQL - Try Again
+              </button>
+            </div>
           </div>
-
-          {/* Right Side: Sticky Add Form */}
-          <div className="lg:col-span-4">
-            <div className="sticky top-24 space-y-6">
-              <div className="flex flex-col gap-2 mb-2">
-                <h2 className="text-lg font-bold text-slate-900">Track New Spend</h2>
-                <p className="text-sm text-slate-500">Add manually or use AI to parse natural language notes.</p>
-              </div>
-              <ExpenseForm onAdd={addExpense} />
-              
-              {/* Quick Tips Box */}
-              <div className="bg-slate-900 text-white p-6 rounded-2xl shadow-xl">
-                <h4 className="text-sm font-bold uppercase tracking-widest text-slate-400 mb-3">Smart Hack</h4>
-                <p className="text-sm leading-relaxed text-slate-300">
-                  Try saying things like <span className="text-indigo-400 italic font-medium">"25 bucks for gas on tuesday"</span> in the AI tab to save time!
-                </p>
+        ) : isLoading ? (
+          <div className="flex flex-col items-center justify-center h-96">
+             <div className="w-12 h-12 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+             <p className="text-slate-500 font-medium">Fetching your records...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div className="lg:col-span-8 space-y-8">
+              <AiInsights expenses={expenses} />
+              <Dashboard expenses={expenses} />
+              <ExpenseList expenses={expenses} onDelete={deleteExpense} />
+            </div>
+            <div className="lg:col-span-4">
+              <div className="sticky top-24 space-y-6">
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <i className="fa-solid fa-circle-plus text-indigo-500"></i>
+                  New Transaction
+                </h2>
+                <ExpenseForm onAdd={addExpense} />
               </div>
             </div>
           </div>
-
-        </div>
+        )}
       </main>
-
-      {/* Floating Action Button for Mobile */}
-      <div className="lg:hidden fixed bottom-6 right-6 z-50">
-        <button 
-          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="w-14 h-14 bg-indigo-600 rounded-full text-white shadow-2xl shadow-indigo-400 flex items-center justify-center hover:scale-110 active:scale-95 transition-all"
-        >
-          <i className="fa-solid fa-plus text-xl"></i>
-        </button>
-      </div>
     </div>
   );
 };

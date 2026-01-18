@@ -5,7 +5,7 @@ import {
   PieChart, Pie, Cell, LineChart, Line
 } from 'recharts';
 import { Expense, Category } from '../types';
-import { CATEGORY_COLORS, CATEGORY_ICONS } from '../constants';
+import { CATEGORY_COLORS, CATEGORY_ICONS } from '../services/constants';
 
 interface DashboardProps {
   expenses: Expense[];

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Category } from './types';
+import { Category } from '../types';
 
 export const CATEGORY_COLORS: Record<Category, string> = {
   [Category.FOOD]: '#ef4444', // red-500

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Expense, Category } from '../types';
-import { CATEGORY_COLORS, CATEGORY_ICONS } from '../constants';
+import { CATEGORY_COLORS, CATEGORY_ICONS } from '../services/constants';
 
 interface ExpenseListProps {
   expenses: Expense[];
