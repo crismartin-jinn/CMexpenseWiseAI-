@@ -95,7 +95,7 @@ const App: React.FC = () => {
               </div>
               <div>
                 <span className="text-xl font-black tracking-tight text-slate-900">
-                  ExpenseWise<span className="text-indigo-600">AI</span>
+                  CMexpenseWise<span className="text-indigo-600">AI</span>
                 </span>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Smart Ledger</p>
               </div>

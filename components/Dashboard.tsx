@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
+  AreaChart, Area
 } from 'recharts';
 import { Expense, Category, Budget } from '../types';
 import { CATEGORY_COLORS } from '../services/constants';
@@ -16,6 +16,11 @@ const Dashboard: React.FC<DashboardProps> = ({ expenses, budget }) => {
   const totalSpent = useMemo(() => expenses.reduce((sum, e) => sum + e.amount, 0), [expenses]);
   const budgetUsage = (totalSpent / budget.limit) * 100;
   
+  const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+  const currentDay = new Date().getDate() || 1;
+  const targetPace = (budget.limit / daysInMonth) * currentDay;
+  const isOverPacing = totalSpent > targetPace;
+
   const statusColor = useMemo(() => {
     if (budgetUsage > 100) return 'text-rose-600';
     if (budgetUsage > 80) return 'text-amber-600';
@@ -46,15 +51,20 @@ const Dashboard: React.FC<DashboardProps> = ({ expenses, budget }) => {
     });
 
     let cumulative = 0;
+    const dayBudgetStep = budget.limit / daysInMonth;
+    
     return Object.entries(data).map(([date, amount]) => {
       cumulative += amount;
+      const d = new Date(date);
+      const dayOfMonth = d.getDate();
       return {
-        date: new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-        amount,
-        cumulative
+        date: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        "Actual Spend": cumulative,
+        "Target Pace": dayBudgetStep * dayOfMonth,
+        daily: amount
       };
     });
-  }, [expenses]);
+  }, [expenses, budget.limit, daysInMonth]);
 
   if (expenses.length === 0) {
     return (
@@ -90,38 +100,114 @@ const Dashboard: React.FC<DashboardProps> = ({ expenses, budget }) => {
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <span className={`text-2xl font-black ${statusColor}`}>{Math.round(budgetUsage)}%</span>
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Used</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Budget Used</span>
           </div>
         </div>
-        <h3 className="font-bold text-slate-800">Monthly Budget</h3>
-        <p className="text-sm text-slate-500 mt-1">${totalSpent.toFixed(0)} of ${budget.limit.toFixed(0)}</p>
+        <div className="space-y-1">
+          <h3 className="font-bold text-slate-800">Spend Overview</h3>
+          <p className="text-xs text-slate-500 font-medium">
+            <span className="font-bold text-slate-900">${totalSpent.toFixed(0)}</span> of ${budget.limit.toFixed(0)}
+          </p>
+        </div>
       </div>
 
-      {/* Spending Trend */}
-      <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="font-bold text-slate-800 flex items-center gap-2">
-            <i className="fa-solid fa-arrow-trend-up text-indigo-500"></i>
-            Spending Velocity
-          </h3>
-          <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-50 px-2 py-1 rounded">Last 14 Days</span>
+      {/* Spending Pace Card */}
+      <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-slate-100 min-w-0">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <div>
+            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <i className="fa-solid fa-gauge-high text-indigo-500"></i>
+              Spending Pace
+            </h3>
+            <p className="text-xs text-slate-500 font-medium">Comparing trend vs. budget</p>
+          </div>
+          <div className={`px-4 py-2 rounded-2xl flex items-center gap-3 border ${isOverPacing ? 'bg-rose-50 border-rose-100' : 'bg-emerald-50 border-emerald-100'}`}>
+            <div className={`w-2 h-2 rounded-full animate-pulse ${isOverPacing ? 'bg-rose-500' : 'bg-emerald-500'}`}></div>
+            <span className={`text-xs font-black uppercase tracking-wider ${isOverPacing ? 'text-rose-700' : 'text-emerald-700'}`}>
+              {isOverPacing ? 'Spending Too Fast' : 'Under Target Pace'}
+            </span>
+          </div>
         </div>
-        <div className="h-[180px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
+
+        {/* Stable Height Container for Recharts */}
+        <div className="h-[250px] w-full min-w-0">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0}>
             <AreaChart data={dailyData}>
               <defs>
-                <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                <linearGradient id="colorActual" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={isOverPacing ? "#f43f5e" : "#6366f1"} stopOpacity={0.15}/>
+                  <stop offset="95%" stopColor={isOverPacing ? "#f43f5e" : "#6366f1"} stopOpacity={0}/>
                 </linearGradient>
               </defs>
-              <Tooltip 
-                contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                itemStyle={{ fontSize: '12px', fontWeight: '700' }}
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis 
+                dataKey="date" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 600 }}
+                dy={10}
               />
-              <Area type="monotone" dataKey="cumulative" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorAmount)" />
+              <YAxis hide domain={[0, 'auto']} />
+              <Tooltip 
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const actual = payload[0].value as number;
+                    const target = payload[1].value as number;
+                    const diff = actual - target;
+                    return (
+                      <div className="bg-white p-4 rounded-2xl shadow-xl border border-slate-100 min-w-[160px]">
+                        <p className="text-[10px] font-black text-slate-400 uppercase mb-2">{payload[0].payload.date}</p>
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center gap-4">
+                            <span className="text-xs font-bold text-slate-600">Total Spent:</span>
+                            <span className="text-xs font-black text-slate-900">${actual.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between items-center gap-4">
+                            <span className="text-xs font-bold text-slate-600">Ideal Target:</span>
+                            <span className="text-xs font-black text-slate-400">${target.toFixed(2)}</span>
+                          </div>
+                          <div className={`pt-1.5 mt-1.5 border-t border-slate-50 flex justify-between items-center font-black text-xs ${diff > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                            <span>{diff > 0 ? 'Over' : 'Safe'}:</span>
+                            <span>${Math.abs(diff).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="Actual Spend" 
+                stroke={isOverPacing ? "#f43f5e" : "#6366f1"} 
+                strokeWidth={3} 
+                fillOpacity={1} 
+                fill="url(#colorActual)" 
+                animationDuration={1500}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="Target Pace" 
+                stroke="#cbd5e1" 
+                strokeWidth={2} 
+                strokeDasharray="5 5" 
+                fill="transparent" 
+                activeDot={false}
+              />
             </AreaChart>
           </ResponsiveContainer>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-4 mt-6">
+          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Daily Burn Rate</p>
+            <p className="text-lg font-black text-slate-900">${(totalSpent / currentDay).toFixed(2)}<span className="text-[10px] text-slate-400 font-bold">/day</span></p>
+          </div>
+          <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Recommended Max</p>
+            <p className="text-lg font-black text-slate-900">${((budget.limit - totalSpent) / Math.max(1, (daysInMonth - currentDay + 1))).toFixed(2)}<span className="text-[10px] text-slate-400 font-bold">/day</span></p>
+          </div>
         </div>
       </div>
 
@@ -129,7 +215,7 @@ const Dashboard: React.FC<DashboardProps> = ({ expenses, budget }) => {
       <div className="lg:col-span-3 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
         <div className="flex items-center justify-between mb-8">
             <h3 className="font-bold text-slate-800">Category Breakdown</h3>
-            <div className="flex gap-2">
+            <div className="hidden md:flex gap-2">
                 {categoryData.slice(0, 3).map(c => (
                     <div key={c.name} className="flex items-center gap-1.5 px-3 py-1 bg-slate-50 rounded-full text-[10px] font-bold text-slate-500 border border-slate-100">
                         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: CATEGORY_COLORS[c.name as Category] }} />
