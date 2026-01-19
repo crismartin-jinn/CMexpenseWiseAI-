@@ -2,17 +2,18 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Expense, Category, SpendingInsight, ParsedExpense } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+const ai = new GoogleGenAI({ apiKey: (process.env as any).API_KEY || '' });
 
 export const analyzeSpending = async (expenses: Expense[]): Promise<SpendingInsight> => {
   if (expenses.length === 0) {
     return {
-      summary: "No expenses to analyze yet. Start adding your spending to get AI insights!",
-      suggestions: ["Add your first expense", "Categorize accurately"],
+      summary: "Add your first transaction to unlock smart financial forecasting!",
+      suggestions: ["Start with groceries or fuel", "Set a monthly budget"],
       topSpendingCategory: "N/A"
     };
   }
 
+  const today = new Date().toISOString().split('T')[0];
   const expenseData = expenses.map(e => ({
     amount: e.amount,
     category: e.category,
@@ -22,7 +23,12 @@ export const analyzeSpending = async (expenses: Expense[]): Promise<SpendingInsi
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: `Analyze these expenses and provide a brief financial summary and 3 specific, helpful suggestions to save money or improve budgeting: ${JSON.stringify(expenseData)}`,
+    contents: `Today is ${today}. Analyze these expenses: ${JSON.stringify(expenseData)}. 
+    1. Provide a concise summary.
+    2. Suggest 3 specific actions.
+    3. Identify the top category.
+    4. Forecast the end-of-month spend based on current velocity.
+    5. List any "anomalies" or unusual spikes.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -33,7 +39,12 @@ export const analyzeSpending = async (expenses: Expense[]): Promise<SpendingInsi
             type: Type.ARRAY,
             items: { type: Type.STRING }
           },
-          topSpendingCategory: { type: Type.STRING }
+          topSpendingCategory: { type: Type.STRING },
+          forecastedTotal: { type: Type.NUMBER },
+          anomalies: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          }
         },
         required: ["summary", "suggestions", "topSpendingCategory"]
       }
@@ -43,22 +54,27 @@ export const analyzeSpending = async (expenses: Expense[]): Promise<SpendingInsi
   try {
     return JSON.parse(response.text || '{}') as SpendingInsight;
   } catch (e) {
-    console.error("Failed to parse AI response", e);
+    console.error("AI Insights Error:", e);
     return {
-      summary: "I'm having trouble analyzing your data right now.",
+      summary: "Working on your financial roadmap...",
       suggestions: [],
-      topSpendingCategory: "Error"
+      topSpendingCategory: "Processing"
     };
   }
 };
 
 export const parseRawExpense = async (input: string): Promise<ParsedExpense> => {
   const categories = Object.values(Category).join(", ");
-  const today = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
-    contents: `Parse this expense note into structured data. Input: "${input}". Today is ${today}. Return the amount, category (must be one of: ${categories}), description, and date (YYYY-MM-DD).`,
+    contents: `Context: Today is ${dayName}, ${todayStr}. Parse: "${input}". 
+    Rules: 
+    - Category must be from: ${categories}. 
+    - Date must be YYYY-MM-DD. Handle relative terms like 'yesterday' or 'last Friday'.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -76,7 +92,6 @@ export const parseRawExpense = async (input: string): Promise<ParsedExpense> => 
   try {
     return JSON.parse(response.text || '{}') as ParsedExpense;
   } catch (e) {
-    console.error("Failed to parse AI expense", e);
     return {};
   }
 };

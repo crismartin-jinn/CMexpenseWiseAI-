@@ -24,6 +24,8 @@ export interface SpendingInsight {
   summary: string;
   suggestions: string[];
   topSpendingCategory: string;
+  forecastedTotal?: number;
+  anomalies?: string[];
 }
 
 export interface ParsedExpense {
@@ -31,4 +33,9 @@ export interface ParsedExpense {
   category?: Category;
   description?: string;
   date?: string;
+}
+
+export interface Budget {
+  limit: number;
+  period: 'monthly';
 }
